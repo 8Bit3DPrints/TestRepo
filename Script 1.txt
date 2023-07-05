@@ -1,0 +1,1576 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Security;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.VisualBasic;
+using System.CodeDom;
+using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows.Automation.Peers;
+using System.Windows.Controls;
+using System.Windows.Shapes;
+using System.Windows.Media.Animation;
+using System.Windows.Media;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Threading;
+using System.Xaml;
+using System.Windows;
+using Excel = Microsoft.Office.Interop.Excel;
+using System.Windows.Input;
+using Microsoft.Office.Interop.Outlook;
+using Path = System.IO.Path;
+
+namespace TimeCollector
+{
+
+    public static class DateTimeExtensions
+    {
+        public static DateTime StartofWeek(this DateTime dt, DayOfWeek startOfWeek)
+        {
+            int diff = (7 + (dt.DayOfWeek - startOfWeek)) % 7;
+            return dt.AddDays(-1 * diff).Date;
+        }
+    }
+
+    public partial class MainWindow : Window
+    {
+        private string ProjectNumber;
+
+        private DateTime CurrentDate = DateTime.Now;
+        private int iCurrentYear = DateTime.Now.Year;
+        private int iCurrentMonth = DateTime.Now.Month;
+        private int iCurrentWeek = DateAndTime.DatePart(DateInterval.WeekOfYear, DateTime.Now);
+        private int iCurrentDayofWeek = (int)DateTime.Now.DayOfWeek;
+        private int iCurrentDay = DateTime.Now.Day;
+        private int iCurentMonthWeekCount;
+        private int iMonth;
+        private DateTime MonthDay1 = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+
+       
+
+
+        private int weekNumMonthStart = new CultureInfo("en-US").Calendar.GetWeekOfYear(DateTime.Now, new CultureInfo("en-US").DateTimeFormat.CalendarWeekRule, new CultureInfo("en-US").DateTimeFormat.FirstDayOfWeek);
+        private int WeekNumber = 1;
+        private string sCurrentDay = DateTime.Now.DayOfWeek.ToString();
+        //string[] names = culture.DateTimeFormat.AbbreviatedDayNames;
+        private string sCurrentDayAbv = DateTime.Now.ToString("ddd");
+        private string sCurrentDaySuffix;
+        private string sCurrentMonth = DateTime.Now.ToString("MMMM");
+        private string sCurrentTime;
+        private string sMonth;
+        private bool DirectoryChecked = false;
+
+        private int lyear;
+        private int lMonth;
+        private int lDay;
+        private DateTime lDate = new DateTime();
+
+        private DateTime today = DateTime.Now;
+        private int daysInMonth = DateTime.DaysInMonth(DateTime.Now.Year, DateTime.Now.Month);
+        private DateTime firstOfMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+        private int firstDayOfMonth = System.Convert.ToInt32 (new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1).DayOfWeek);
+        private int weeksInMonth;
+
+
+        private int AdjWeekday;
+        private int WeekStop;
+        private int WeekStartDate;
+        private DateTime sWeekStartDate;
+        private int MonthWeekNumber;
+
+        private bool FileLoadFailed;
+        private bool FileWriteFailed;
+        private bool ManualDate;
+        private bool LoadCurrentWeek;
+
+        private string SelectedFile;
+
+        private bool LookupComplete = false;
+
+        private DispatcherTimer ClockTimer = new DispatcherTimer();
+
+        public bool UseManualDateInfo;
+        public bool LogHoursAnimationRunning;
+        public bool LogHoursAnimationStop;
+
+        public bool NetworkDrivesConnected;
+
+        public string WOsFilePath;
+        public string NetworkWOsFilePath;
+        public string LocalWOsFilePath;
+
+
+        public MainWindow()
+        {
+
+            // This call is required by the designer.
+            InitializeComponent();
+
+            // Add any initialization after the InitializeComponent() call.
+            ClockTimer.Interval = TimeSpan.FromMilliseconds(750);
+            ClockTimer.Tick += ClockTimerTick;
+            ClockTimer.Start();
+        }
+
+        public void ClockTimerTick(System.Object sender, EventArgs e)
+        {
+
+            // Update Current Time Display Each Second
+            textBlockCurrentTime.Text = DateAndTime.TimeString;
+
+            // Disable Log Hours Button if All Entries are Not Completed.
+            bool AutoLogDisable;
+            bool ManualLogDisable;                     
+
+            // If Any of the Auto Entires are Equal to Their Default Entries, Disable the Log Hours Button
+            AutoLogDisable = (comboBoxProjectNumber.Text == "Project Number") | (comboBoxWorkOrderNumber.Text == "Work Order") | (textBoxHours.Text == "Hours Worked") | (comboBoxOpNum.Text == "OpNumber") | (comboBoxWrkCtrID.Text == "Work Center ID");
+            // If Manual Date Info is Enabled, AND Any of the Manual Date Fields are Equal to their Default Entires, Disable the Log Hours Button
+            ManualLogDisable = System.Convert.ToBoolean(UseManualDateInfo & ((comboBoxManualDay.Text == "") | (textBoxManualYear.Text == "Year") | (textBoxManualMonth.Text == "Month") | (textBoxManualDay.Text == "Day")));
+
+            if (AutoLogDisable | ManualLogDisable)
+                buttonLogHours.IsEnabled = false;
+
+
+            if (comboBoxProjectNumber.Text == "Project Number")
+                buttonLoadWOs.IsEnabled = false;
+            else
+                buttonLoadWOs.IsEnabled = true;
+
+
+            if (comboBoxProjectNumber.SelectedIndex != 0)
+            {
+                if (LookupComplete == true)
+                    // AnimateLoadWOButton()
+                    LoadWOButtonBounce();
+            }
+
+            // Update enable status on Log Hours Button Once All data is Entered.
+
+            if (!AutoLogDisable && !ManualLogDisable)
+            {
+                if ((!(comboBoxProjectNumber.Text == "Project Number")) & (!(comboBoxWorkOrderNumber.Text == "Work Order")) & (!(textBoxHours.Text == "Hours Worked")) & (!(comboBoxOpNum.Text == "OpNumber")) & (!(comboBoxWrkCtrID.Text == "Work Center ID")))
+                {
+                    buttonLogHours.IsEnabled = true;
+                    LogHoursButtonBounce();
+
+                }
+                else
+                {
+                    buttonLogHours.IsEnabled = false;
+                    LogHoursAnimationStop = true;
+                    LogHoursButtonBounce();
+                }
+
+            }
+
+
+
+          
+
+          
+        }
+
+        public void LoadWOButtonBounce()
+        {
+            Storyboard StoryBoard1 = TryFindResource("Storyboard1") as Storyboard;
+
+            if (!DependencyPropertyHelper.GetValueSource(buttonLoadWOs, Button.RenderTransformProperty).IsAnimated)
+                StoryBoard1.Begin();
+            else
+                StoryBoard1.Stop();
+        }
+        public void LogHoursButtonBounce()
+        {
+            if (!LogHoursAnimationRunning == true)
+                {
+
+                Storyboard StoryBoard2 = TryFindResource("Storyboard2") as Storyboard;
+                StoryBoard2.Begin();
+                LogHoursAnimationRunning = true;
+
+               if (LogHoursAnimationStop == true)
+                {
+                    StoryBoard2.Stop();
+                    LogHoursAnimationRunning = false;
+                }
+
+            }
+        }
+
+
+
+
+        public void CheckDirectory()
+        {
+
+            // This Sub Routine Checks the Directory Structure on the C Drive. If the Structure Doesnt Exist, it is Created.
+
+            // ------------------------------------------------------------------------------------------------------
+            // Adjust the Weekday Start to Get a Thursday Offset
+            // ISO 8601 scheme for year-weeks, where a week (a Mon-Sun period) falls into the year which
+            // contains it's Thursday.
+            // Here a month contains a week if the Thursday of that week falls in the month.
+            // Logically the number of such weeks in a month Is the same as the number of Thursdays in that month.
+            // You can derive this figure from the number Of month-days In the month, And the week-day of the
+            // first month-day of the month.
+            // A 28 - Day() month always contains exactly 4 Thursdays. Months with more than 28 month-days may
+            // contain 5 Thursdays.
+            // You can convert an ISO week-day number (Mon = 1, Sun = 7) to the following format Like so:
+            // ((weekday + 2) Mod 7) - 2
+            // Mon = 1, Tue = 2, Wed = 3, Thu = 4, Fri = -2, Sat = -1, Sun = 0
+            // Then add this adjusted week-day figure to the number of month-days. If the result exceeds 32,
+            // then it Is a month containing 5 weeks.
+            // So a 31-day month starting On a Monday, produces a figure of 32 (31 + 1). It contains 4 weeks.
+            // A 31 - Day() month starting On a Tuesday, produces a figure of 33 (31 + 2). It contains 5 weeks.
+            // A 31 - Day() month starting On a Friday, produces a figure of 29 (31 + (-2)). It contains 4 weeks.
+            // ------------------------------------------------------------------------------------------------------
+            AdjWeekday = ((firstDayOfMonth + 2) % 7) - 2;
+
+            // Set the number of weeks in the current month
+            if (daysInMonth + AdjWeekday > 31)
+                weeksInMonth = 5;
+            else
+                weeksInMonth = 4;
+
+
+
+            // If Directoy Has Not Been Checked With this Instance of the App Running,
+            // Then Check and Create any Folders or .txt files necessary.
+            if (DirectoryChecked == false)
+            {
+                WeekNumber = weekNumMonthStart;
+                sWeekStartDate = DateTime.Now.StartofWeek(DayOfWeek.Monday);
+                WeekStop = WeekNumber + weeksInMonth;
+
+
+
+                // Check for Top Level Directory
+                // If It Does not Exist, Create it, and current year directory, and Files for the Current Year
+                if (!Directory.Exists(@"C:\_Timecards"))
+                {
+                    Directory.CreateDirectory(@"C:\_Timecards");
+                    Directory.CreateDirectory(@"C:\_Timecards\" + iCurrentYear);
+
+
+                    MonthWeekNumber = 1;
+
+                    while (WeekNumber < WeekStop)
+                    {
+                        File.Create(@"C:\_Timecards\" + iCurrentYear + @"\" + "week" + WeekNumber + "_" + iCurrentYear + "_" + sCurrentMonth + "W" + MonthWeekNumber + ".txt").Close();
+                        WeekNumber += 1;
+                        MonthWeekNumber += 1;
+                    }
+                }
+
+
+                // Check for Daily Timecard File
+                if (!File.Exists(@"C:\_Timecards\TodaysTime.txt"))
+                    File.Create(@"C:\_Timecards\TodaysTime.txt").Close();
+
+                // Check for ErrorLog File
+                if (!File.Exists(@"C:\_Timecards\ErrorLog.txt"))
+                    File.Create(@"C:\_Timecards\ErrorLog.txt").Close();
+
+                // Check for year Directory
+                // If It Does not Exist, Create it, and Files for the Current Year
+                if (Directory.Exists(@"C:\_Timecards"))
+                {
+                    if (!Directory.Exists(@"C:\_Timecards\" + iCurrentYear))
+                    {
+                        Directory.CreateDirectory(@"C:\_Timecards\" + iCurrentYear);
+
+                        MonthWeekNumber = 1;
+
+                        while (WeekNumber < WeekStop)
+                        {
+                            File.Create(@"C:\_Timecards\" + iCurrentYear + @"\" + "week" + WeekNumber + "_" + iCurrentYear + "_" + sCurrentMonth + "W" + MonthWeekNumber + ".txt").Close();
+                            WeekNumber += 1;
+                            MonthWeekNumber += 1;
+                        }
+                    }
+                }
+            }
+
+
+            // Start File Check
+
+
+
+            MonthWeekNumber = WeekNum(today);
+            WeekNumber = iCurrentWeek - 1;
+            FileCheck();
+
+
+            DirectoryChecked = true;
+        }
+        public static int WeekNum(DateTime TargetDate)
+        {
+
+            // This Function Gets the Current Week number of the current month. This is used to name the timesheet files
+
+            double WeekNumber;
+            int DaytoUse = TargetDate.Day - 1;
+            double Division = DaytoUse / (double)7;
+            double Final = Division + 1;
+
+            WeekNumber = Math.Ceiling(Final);
+            int WeekNumberInt = Convert.ToInt32(WeekNumber);
+
+            return System.Convert.ToInt32(WeekNumber);
+        }
+
+        public void FileCheck()
+        {
+
+            // File Check Sub Routine. This Will check if the current week file exists and if not it will create it.
+            string FilePath;
+            string sSearchString = "Week" + WeekNumber + "*";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\" + iCurrentYear + @"\", sSearchString);
+            string AppendText = textBoxSelectedWeek.Text;
+
+            if (files.Length > 0)
+            {
+                ProcessStartInfo file3dopen = new ProcessStartInfo();
+                {
+                    var withBlock = file3dopen;
+                    withBlock.FileName = files[0];
+                    withBlock.UseShellExecute = true;
+                }
+                // Process.Start(file3dopen)
+                FilePath = file3dopen.FileName;
+            }
+            else
+            {
+                // file not found
+                Interaction.MsgBox("No Such File Exists, Creating Now");
+                File.Create(@"C:\_Timecards\" + iCurrentYear + @"\" + "week" + WeekNumber + "_" + iCurrentYear + "_" + sCurrentMonth + "W" + MonthWeekNumber + ".txt").Close();
+            }
+        }
+
+
+        public void LoadSelectedWeek()
+        {
+
+
+            // This Sub Routine searches for a week file with the current week number in its file name and displays it in the textboxSelectedWeek
+
+            if (LoadCurrentWeek == true)
+                WeekNumber = iCurrentWeek - 1;
+
+            string FilePath;
+            string sSearchString = "Week" + WeekNumber + "*";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\" + iCurrentYear + @"\", sSearchString);
+            string Right;
+            string Left;
+            double TotalHours = 0;
+            int Pointer = 1;
+            double LinesHours;
+            string[] StringArray;
+            string HoursSubset;
+
+            string TextLine;
+
+
+            string line = null;
+            int lines = 0;
+
+
+            try
+            {
+                if (files.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    int lineCount;
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = files[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen) NOT NEEDED, BUT KEEPING FOR FUTURE REFERENCE
+                    FilePath = file3dopen.FileName;
+                    textBoxSelectedWeek.Text = System.IO.File.ReadAllText(FilePath);
+                    lineCount = System.IO.File.ReadAllLines(FilePath).Length;
+                    Right = file3dopen.FileName.Remove(0, 19);
+                    Left = Right.Replace(".txt", "");
+                    SelectedFile = Left;
+
+                    // Update Week Number Dispaly
+                    textBlockWeekNumber.Text = SelectedFile;
+
+
+                    // Calculate Total Hours on Current Selected Week / File
+                    System.IO.StreamReader objReader = new System.IO.StreamReader(FilePath);
+                    int ArrayLength;
+
+
+
+                    // Read Each Line and Parse out the hour value. Then Add to Variable to be Displayed
+                    while (objReader.Peek() != -1)
+                    {
+                        TextLine = objReader.ReadLine();
+                        if (TextLine != "")
+                        {
+                            StringArray = TextLine.Split(" - ", StringSplitOptions.None);
+                            ArrayLength = StringArray.Length;
+                            if (ArrayLength >= 6)
+                            {
+                                HoursSubset = StringArray[6];
+                                LinesHours = System.Convert.ToDouble(HoursSubset.Replace("Hours", ""));
+                                TotalHours += LinesHours;
+                                StringArray = null;
+                            }
+                        }
+                    }
+
+                    // Display the Total Hours
+                    textBlockTotalHours.Text = "Total Hours: " + TotalHours;
+
+                    // Close the Reader to Avoid Duplicate File Reads in other Subs
+                    objReader.Close();
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileLoadFailed = true;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show("A Handled Exception Occured. This is Likely Due to a New Entry Being Created on the Same Line as an Existing Entry. Manually Fix the Lines in the Selected Week Box, Save Changes, and Reload the Application." + Constants.vbCrLf + "Error: " + ex.Message, "Load Selected Week", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        public void LoadTodaysTime()
+        {
+
+
+            // This Sub Routine Reads the TodaysTime text file and displays it in the textboxTodaysTime
+
+
+            string FilePath;
+            string sSearchString = "TodaysTime.txt";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\", sSearchString);
+            string Right;
+            string Left;
+            double TotalHours =0;
+            int Pointer = 1;
+            double LinesHours;
+            string[] StringArray;
+            string HoursSubset;
+            string TodaysTime;
+            int Length;
+            string Day;
+
+            string TextLine;
+
+
+            string line = null;
+            int lines = 0;
+
+
+            try
+            {
+                if (files.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    int lineCount;
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = files[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen) NOT NEEDED, BUT KEEPING FOR FUTURE REFERENCE
+                    FilePath = file3dopen.FileName;
+
+                    // Get The Day that is Currently in the TodaysTime Text File. If it Is not Today, Clear TodaysTime Textbox
+                    TodaysTime = System.IO.File.ReadAllText(FilePath);
+                    Length = TodaysTime.Length;
+
+                    // Check String Length. If No Text is in file, ignore Code.
+                    if (!(Length == 0))
+                    {
+                        textBoxTodaysTime.Text = System.IO.File.ReadAllText(FilePath);
+                        lineCount = System.IO.File.ReadAllLines(FilePath).Length;
+                        Right = file3dopen.FileName.Remove(0, 19);
+                        Left = Right.Replace(".txt", "");
+                        SelectedFile = Left;
+
+                        // Calculate Total Hours on TodaysTime File
+                        System.IO.StreamReader objReader = new System.IO.StreamReader(FilePath);
+                        int ArrayLength;
+
+                        // Read Each Line and Parse out the hour value. Then Add to Variable to be Displayed
+                        while (objReader.Peek() != -1)
+                        {
+                            TextLine = objReader.ReadLine();
+                            if (TextLine != "")
+                            {
+                                StringArray = TextLine.Split(" - ", StringSplitOptions.None);
+                                ArrayLength = StringArray.Length;
+                                if (ArrayLength >= 6)
+                                {
+                                    HoursSubset = StringArray[6];
+                                    LinesHours = Convert.ToDouble(HoursSubset.Replace("Hours", ""));
+                                    TotalHours += LinesHours;
+                                    StringArray = null;
+                                }
+                            }
+                        }
+
+                        // Display the Total Hours
+                        textBlockTotalHoursToday.Text = "Total Hours: " + TotalHours;
+
+                        // Close the Reader to Avoid Duplicate File Reads in other Subs
+                        objReader.Close();
+                    }
+                    else
+                        // Display the Total Hours
+                        textBlockTotalHoursToday.Text = "Total Hours: 0";
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileLoadFailed = true;
+                }
+            }
+            catch (InvalidCastException ex)
+            {
+                MessageBox.Show("A Handled Exception Occured. This is Likely Due to a New Entry Being Created on the Same Line as an Existing Entry. Manually Fix the Lines in the Todays Time Box, Save Changes, and Reload the Application." + Constants.vbCrLf + "Error: " + ex.Message, "Load Selected Week", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        public void WriteSelectedWeek()
+        {
+
+            // This Sub Routine Writes The Current Time Entires Data to the Selected Weeks Text File.
+
+            string FilePath;
+            string sSearchString = "Week" + WeekNumber + "*";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\" + iCurrentYear + @"\", sSearchString);
+            string AppendText = textBoxSelectedWeek.Text;
+
+            if (files.Length > 0)
+            {
+                ProcessStartInfo file3dopen = new ProcessStartInfo();
+                {
+                    var withBlock = file3dopen;
+                    withBlock.FileName = files[0];
+                    withBlock.UseShellExecute = true;
+                }
+                // Process.Start(file3dopen)
+                FilePath = file3dopen.FileName;
+                using (StreamWriter sw = File.AppendText(FilePath))
+                {
+                    sw.WriteLine(AppendText);
+                    sw.Close();
+                }
+
+                File.WriteAllText(FilePath, Regex.Replace(File.ReadAllText(FilePath), @"(?m)^\s+^", ""));
+            }
+            else
+            {
+                // file not found
+                Interaction.MsgBox("No Such File Exists");
+                FileWriteFailed = true;
+            }
+        }
+        public void WriteTodaysTime()
+        {
+
+            // This Sub Routine Writes The Current Time Entires Data to the TodaysTime Text File, Only if Entering Time for Today.
+            // If the Manual Time Info Checkbox is Checked, This data will not be entered into the Todays Time box
+
+            if (CheckBoxManualDateInfo.IsChecked == false)
+            {
+                string FilePath;
+                string sSearchString = "TodaysTime.txt";
+                string[] files = Directory.GetFiles(@"C:\_Timecards\", sSearchString);
+                string AppendText = textBoxTodaysTime.Text;
+
+                if (files.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = files[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen)
+                    FilePath = file3dopen.FileName;
+                    using (StreamWriter sw = File.AppendText(FilePath))
+                    {
+                        sw.WriteLine(AppendText);
+                        sw.Close();
+                    }
+
+                    File.WriteAllText(FilePath, Regex.Replace(File.ReadAllText(FilePath), @"(?m)^\s+^", ""));
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileWriteFailed = true;
+                }
+            }
+        }
+        public void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+
+            // This Subroutine handles the loading of the Main Time Collector window. It is the starting point
+            // that calls all other subroutines to check directories and create needed files. It also sets up
+            // some of the comboboxes entires.
+
+            NetworkWOsFilePath = @"I:\Autotec Time Collector\JobsAndWOs";
+            LocalWOsFilePath = @"C:\_Timecards\JobsAndWOs";
+
+
+            // Check to see if Network Directries Connected
+            if (Directory.Exists(@"I:\"))
+            {
+                //Set Network Drives Connected Bit to True and use Network Files
+                NetworkDrivesConnected = true;
+                WOsFilePath = NetworkWOsFilePath;
+
+                //Copy Network files for later use when Drives are Not Connected
+                //String SourcePath = WOsFilePath;
+                // Get information about the source directory
+                var Networkdir = new DirectoryInfo(NetworkWOsFilePath);
+                var Localdir = new DirectoryInfo(LocalWOsFilePath);
+
+                // Check if the source directory exists
+                if (!Networkdir.Exists)
+                    throw new DirectoryNotFoundException($"Source directory not found: {Networkdir.FullName}");
+
+                // Cache directories before we start copying
+                DirectoryInfo[] dirs = Networkdir.GetDirectories();
+
+                // Create the destination directory
+                if (!Localdir.Exists);
+                Directory.CreateDirectory(LocalWOsFilePath);
+
+
+
+                // Get the files in the source directory and copy to the destination directory
+                foreach (FileInfo file in Networkdir.GetFiles())
+                {
+                    string targetFilePath = Path.Combine(LocalWOsFilePath, file.Name);
+                    FileInfo CopiedFile = new FileInfo(targetFilePath);
+                    if (!CopiedFile.Exists)
+                    {
+                        file.CopyTo(targetFilePath);
+                    }
+                    
+
+                }
+            }
+            else
+            {
+                //Set Network Drives Connected Bit to False and use the Local Copies Instead
+                NetworkDrivesConnected = false;
+                WOsFilePath = LocalWOsFilePath;
+            }
+
+
+
+
+
+
+            LookupProjects();
+
+            WeekNumber = iCurrentWeek;
+
+            if (DirectoryChecked == true)
+            {
+                LoadCurrentWeek = true;
+                LoadSelectedWeek();
+                LoadTodaysTime();
+                LoadCurrentWeek = false;
+            }
+            else
+            {
+                CheckDirectory();
+                LoadCurrentWeek = true;
+                LoadSelectedWeek();
+                LoadTodaysTime();
+                LoadCurrentWeek = false;
+            }
+
+
+            // Get Day Suffix
+            switch (iCurrentDay)
+            {
+                case 1:
+                    {
+                        break;
+                    }
+
+                case 21:
+                    {
+                        break;
+                    }
+
+                case 31:
+                    {
+                        sCurrentDaySuffix = "st";
+                        break;
+                    }
+
+                case 2:
+                    {
+                        break;
+                    }
+
+                case 22:
+                    {
+                        sCurrentDaySuffix = "nd";
+                        break;
+                    }
+
+                case 3:
+                    {
+                        break;
+                    }
+
+                case 23:
+                    {
+                        sCurrentDaySuffix = "rd";
+                        break;
+                    }
+
+                default:
+                    {
+                        sCurrentDaySuffix = "th";
+                        break;
+                    }
+            }
+
+
+            // Set Date display to current date
+            textBlockCurrentDateTime.Text = sCurrentDay + ", " + sCurrentMonth + " " + iCurrentDay + sCurrentDaySuffix + " " + iCurrentYear;
+
+
+            // Populate Op Number Combo Box
+            comboBoxOpNum.Items.Clear();
+            comboBoxOpNum.Items.Add("OpNumber");
+            comboBoxOpNum.Items.Add("0010");
+            comboBoxOpNum.Items.Add("0020");
+            comboBoxOpNum.Items.Add("0030");
+            comboBoxOpNum.Items.Add("0040");
+            comboBoxOpNum.Items.Add("0050");
+            comboBoxOpNum.Items.Add("0060");
+            comboBoxOpNum.Items.Add("0070");
+            comboBoxOpNum.Items.Add("0080");
+            comboBoxOpNum.Items.Add("0090");
+            comboBoxOpNum.Items.Add("0100");
+            comboBoxOpNum.Items.Add("0110");
+            comboBoxOpNum.Items.Add("0120");
+            comboBoxOpNum.Items.Add("0130");
+            comboBoxOpNum.Items.Add("0130");
+            comboBoxOpNum.Items.Add("0150");
+            comboBoxOpNum.Items.Add("0000");
+
+            // Populate Work Center ID Combo Box
+            comboBoxWrkCtrID.Items.Clear();
+            comboBoxWrkCtrID.Items.Add("Work Center ID");
+            comboBoxWrkCtrID.Items.Add("PMGT");
+            comboBoxWrkCtrID.Items.Add("MELO");
+            comboBoxWrkCtrID.Items.Add("MEAF");
+            comboBoxWrkCtrID.Items.Add("EELO");
+            comboBoxWrkCtrID.Items.Add("EEAF");
+            comboBoxWrkCtrID.Items.Add("CUT");
+            comboBoxWrkCtrID.Items.Add("MACH");
+            comboBoxWrkCtrID.Items.Add("FAB");
+            comboBoxWrkCtrID.Items.Add("PNTG");
+            comboBoxWrkCtrID.Items.Add("ASMB");
+            comboBoxWrkCtrID.Items.Add("MWIR");
+            comboBoxWrkCtrID.Items.Add("CENG");
+            comboBoxWrkCtrID.Items.Add("CEEE");
+            comboBoxWrkCtrID.Items.Add("CASM");
+            comboBoxWrkCtrID.Items.Add("CASE");
+            comboBoxWrkCtrID.Items.Add("ENGS");
+            comboBoxWrkCtrID.Items.Add("SVTC");
+            comboBoxWrkCtrID.Items.Add("CONE");
+            comboBoxWrkCtrID.Items.Add("CSMA");
+            comboBoxWrkCtrID.Items.Add("QUOT");
+            comboBoxWrkCtrID.Items.Add("REDE");
+            comboBoxWrkCtrID.Items.Add("MAIN");
+            comboBoxWrkCtrID.Items.Add("INSP");
+            comboBoxWrkCtrID.Items.Add("SHIP");
+            comboBoxWrkCtrID.Items.Add("CLEA");
+            comboBoxWrkCtrID.Items.Add("SHMG");
+            comboBoxWrkCtrID.Items.Add("PUAD");
+            comboBoxWrkCtrID.Items.Add("TRNG");
+            comboBoxWrkCtrID.Items.Add("SAFE");
+            comboBoxWrkCtrID.Items.Add("MEET");
+
+            comboBoxManualDay.Visibility = Visibility.Hidden;
+            textBoxManualYear.Visibility = Visibility.Hidden;
+            textBoxManualMonth.Visibility = Visibility.Hidden;
+            textBoxManualDay.Visibility = Visibility.Hidden;
+
+            textBlockManualWeekDay.Visibility = Visibility.Hidden;
+            textBlockManualYear.Visibility = Visibility.Hidden;
+            textBlockManualMonth.Visibility = Visibility.Hidden;
+            textBlockManualDay.Visibility = Visibility.Hidden;
+
+            buttonSaveChanges.Visibility = Visibility.Collapsed;
+        }
+        void LookupProjects()
+        {
+
+            // This Sub Looks up the CSV files on the I Drive Job Details Folder and Populates a Drop Down List with Job Numbers (File Names)
+
+           
+            string ProjectNumber;
+
+            comboBoxProjectNumber.Items.Add("Project Number");
+
+            foreach (string file in System.IO.Directory.GetFiles(WOsFilePath))
+            {
+                ProjectNumber = (System.IO.Path.GetFileNameWithoutExtension(file)).Remove(0, 11);
+                comboBoxProjectNumber.Items.Add(ProjectNumber);
+            }
+
+            comboBoxProjectNumber.Items.Add(7700 + ": Sick Paid");
+            comboBoxProjectNumber.Items.Add(7710 + ": Vacation Paid");
+            comboBoxProjectNumber.Items.Add(7720 + ": Holiday Paid");
+            comboBoxProjectNumber.Items.Add(7730 + ": Bereavement Paid");
+            comboBoxProjectNumber.Items.Add(7740 + ": Jury Duty");
+            comboBoxProjectNumber.Items.Add(7800 + ": General Shop");
+            comboBoxProjectNumber.Items.Add(7850 + ": General Shop Training");
+            comboBoxProjectNumber.Items.Add(8000 + ": General Engineering");
+            comboBoxProjectNumber.Items.Add(8100 + ": Engineering Meetings");
+            comboBoxProjectNumber.Items.Add(8300 + ": Engineering Service");
+            comboBoxProjectNumber.Items.Add(8400 + ": Engineering Training / Education");
+            comboBoxProjectNumber.Items.Add(8500 + ": Engineering Management");
+            comboBoxProjectNumber.Items.Add(8600 + ": Help Desk Support");
+            comboBoxProjectNumber.Items.Add(8900 + ": IT Maintenance");
+            comboBoxProjectNumber.Items.Add(8920 + ": Is Development");
+            comboBoxProjectNumber.Items.Add(9800 + ": General Sales");
+            comboBoxProjectNumber.Items.Add(9805 + ": General Sales RSB");
+            comboBoxProjectNumber.Items.Add(9810 + ": Marketing");
+        }
+
+        void comboBoxProjectNumber_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+
+            // This detectes changes on the project number combobox
+
+            // Clear any entires in the Work Orders Combobox
+            comboBoxWorkOrderNumber.Items.Clear();
+
+            // Add the default item "Work Order" to the Work Orders Combobox
+            comboBoxWorkOrderNumber.Items.Add("Work Order");
+
+            // Select the Default Item Until new Work Orders are Loaded
+            comboBoxWorkOrderNumber.SelectedIndex = 0;
+
+            // Set that the Projectnumber Lookup is complete
+            LookupComplete = true;
+        }
+
+        void buttonLoadWOs_Click(object sender, RoutedEventArgs e)
+        {
+
+            // This sub Handles the Click event of the Load Work Orders Button. It calls the Lookup Function for the
+            // Work Orders. If the Project Number selected is an overhead Project Number, then it Fills in the
+            // Work Orders Combobox with all 0's.
+
+            string ProjectNumberSelection;
+
+            // Put the Project Number Selected into a tag for Parsing
+            ProjectNumberSelection = System.Convert.ToString(comboBoxProjectNumber.SelectedValue);
+
+            // Build the File Name to Open in the Background and Load in Work Orders
+            ProjectNumber = "WORK ORDER " + ProjectNumberSelection;
+
+            // If Project is NOT Overhead, then Lookup Work Orders
+            if (ProjectNumberSelection.StartsWith("7") == false & ProjectNumberSelection.StartsWith("8") == false & ProjectNumberSelection.StartsWith("9") == false)
+                LookupWorkOrders();
+            else
+            {
+                comboBoxWorkOrderNumber.Items.Clear();
+                comboBoxWorkOrderNumber.Items.Add("0000");
+                comboBoxWorkOrderNumber.SelectedIndex = 0;
+            }
+
+            // Set the Project Number Lookup Complete back to False in Case a differet Project Number is Chosen
+            LookupComplete = false;
+        }
+
+        public void LookupWorkOrders()
+        {
+
+            // This Sub Looks up the CSV files on the I Drive Job Details Folder and Populates a Drop Down List with Work Order Numebers out of the Selected CSV File
+
+            // Dim Lines As String() = Nothing
+            string FilePath = @"C:\_Timecards\JobsAndWOs\" + "WORK ORDER " + System.Convert.ToString(comboBoxProjectNumber.SelectedValue) + ".csv";
+            int LineCount;
+            // Dim Line As String()
+            // Dim TextLine As String
+            // Dim StringArray As String()
+            Microsoft.Office.Interop.Excel.Application eApp;
+            Microsoft.Office.Interop.Excel.Workbook eBook;
+            Microsoft.Office.Interop.Excel.Worksheet eSheet;
+            Microsoft.Office.Interop.Excel.Range eCell;
+            int LineIndex;
+            string Description;
+            string RouterNumber;
+            string WorkOrderNumber;
+            int DescriptionLength;
+            string DescriptionColumn = "AN";
+            string WorkOrderDataColumn = "BI";
+            string cellSelect;
+
+
+            // Set Description Placeholder Strings
+            string DescriptionUpdate = "DESCRIPTION:  -UPDATE DESCRIPTION-";
+            string DescriptionPlaceholder = "DESCRIPTION:  PLACEHOLDER";
+
+            // Create Microsoft Excel Instance in Background to Open and Read CSV files
+            eApp = new Microsoft.Office.Interop.Excel.Application();
+            eBook = eApp.Workbooks.Open(FilePath);
+            eSheet = eBook.Worksheets[1];
+            eCell = eSheet.UsedRange;
+
+
+            System.Array eCellArray = (Array)eCell.Value;
+
+
+            // Set Line Count Based on Total Number of Lines in CSV File
+            LineCount = eSheet.UsedRange.Rows.Count;
+
+
+            // Set Line Index to 1 at the Start and Clear the Currnet Values in the Work Order Combo Box
+            LineIndex = 1;
+            comboBoxWorkOrderNumber.Items.Clear();
+
+
+
+            // Read Each Line
+            // Read Description out of Column 40 and Check the Description. If the Description is one of the Placeholder Values, Jump Out of the Loop as This Value Should not Be Entered Into the ComboBox
+            // If the Description is NOT One of the Placeholder Values, Get the Router Number out of Column 61. Parse This to get the Work Order.
+            // Increase the Index to the Next Line
+            // If the Work Order Number Does Not Already Exist, Add it to the ComboBox
+            while (LineIndex <= LineCount)
+            {
+                var ANcell = (Excel.Range)eSheet.Cells[LineIndex, DescriptionColumn];
+                Description = ANcell.Value.ToString();    
+                DescriptionLength = Description.Length;
+
+                if (Description == DescriptionUpdate || Description == DescriptionPlaceholder)
+                    break;
+
+                if (!(Description == DescriptionUpdate) && !(Description == DescriptionPlaceholder))
+                {
+                    var BIcell = (Excel.Range)eSheet.Cells[LineIndex, WorkOrderDataColumn];
+                    LineIndex += 1;
+                    if (!(BIcell.Value == null))
+                    {
+                        RouterNumber = BIcell.Value.ToString();
+                        if (!(RouterNumber == null))
+                        {
+                            WorkOrderNumber = RouterNumber.Substring(11, 4) + ": " + Description.Substring(14, DescriptionLength - 14);
+                            if (!comboBoxWorkOrderNumber.Items.Contains(WorkOrderNumber))
+                                comboBoxWorkOrderNumber.Items.Add(WorkOrderNumber);
+                        }
+                    }
+                        
+                    
+                }
+            }
+
+            comboBoxWorkOrderNumber.SelectedIndex = 0;
+
+            // Close the Excel File and Quit the Background instance if Excel
+            eBook.Close(SaveChanges: false);
+            eApp.Quit();
+        }
+
+
+
+        public void textBoxHours_GotMouseCapture(object sender, MouseEventArgs e)
+        {
+            // Code to Select All Text Currently in the Hours Text Box When Selected
+            textBoxHours.SelectAll();
+        }
+
+        public void textBoxHours_GotFocus(object sender, RoutedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Hours Text Box When Selected
+            textBoxHours.SelectAll();
+        }
+
+        public void textBoxHours_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Hours Text Box When Selected
+            textBoxHours.SelectAll();
+        }
+
+        public void textBoxManualYear_GotMouseCapture(object sender, MouseEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Year Text Box When Selected
+            textBoxManualYear.SelectAll();
+        }
+
+        public void textBoxManualYear_GotFocus(object sender, RoutedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Year Text Box When Selected
+            textBoxManualYear.SelectAll();
+        }
+
+        public void textBoxManualYear_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Year Text Box When Selected
+            textBoxManualYear.SelectAll();
+        }
+
+
+        public void textBoxManualMonth_GotMouseCapture(object sender, MouseEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Month Text Box When Selected
+            textBoxManualMonth.SelectAll();
+        }
+
+        public void textBoxManualMonth_GotFocus(object sender, RoutedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Month Text Box When Selected
+            textBoxManualMonth.SelectAll();
+        }
+
+        public void textBoxManualMonth_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Month Text Box When Selected
+            textBoxManualMonth.SelectAll();
+        }
+
+
+        public void textBoxManualDay_GotMouseCapture(object sender, MouseEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Day Text Box When Selected
+            textBoxManualDay.SelectAll();
+        }
+
+        public void textBoxManualDay_GotFocus(object sender, RoutedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Day Text Box When Selected
+            textBoxManualDay.SelectAll();
+        }
+
+        public void textBoxManualDay_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Code to Select All Text Currently in the Manual Day Text Box When Selected
+            textBoxManualDay.SelectAll();
+        }
+
+        public void textBoxHours_LostFocus(object sender, RoutedEventArgs e)
+        {
+            // Code to Put the Default Value Back into the Textbox if no Value is Entered
+            if (textBoxHours.Text == "")
+                textBoxHours.Text = "Hours Worked";
+        }
+
+        public void textBoxHours_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Code to Put the Default Value Back into the Textbox if no Value is Entered
+            if (textBoxHours.Text == "")
+                textBoxHours.Text = "Hours Worked";
+        }
+
+        public void textBoxHours_LostMouseCapture(object sender, MouseEventArgs e)
+        {
+            // Code to Put the Default Value Back into the Textbox if no Value is Entered
+            if (textBoxHours.Text == "")
+                textBoxHours.Text = "Hours Worked";
+        }
+
+        public void textBoxTodaysTime_TextChanged(object sender, TextChangedEventArgs e)
+        {
+
+            // Make the Save Changes Button Visible if anything in the Todays Time Text Box has Changed
+            buttonSaveChanges.Visibility = System.Windows.Visibility.Visible;
+        }
+
+        public void textBoxSelectedWeek_TextChanged(object sender, TextChangedEventArgs e)
+        {
+
+            // Make the Save Changes Button Visible if anything in the Selected Weeks Text Box has Changed
+            buttonSaveChanges.Visibility = System.Windows.Visibility.Visible;
+        }
+        public void buttonLogHours_Click(object sender, RoutedEventArgs e)
+        {
+            UseManualDateInfo = false;
+
+
+            // Add Items from Each Entry Into the SelectedWeek Text Box as well as the Todays Time text box and then Save to a Text File
+
+            string DateCode;
+            string ProjectNumber;
+            string WorkOrderNumber;
+            string ChargeCode;
+            string ManualDayAbv;
+            string WeekFilePath;
+            string TodayFilePath;
+            string WeekSearchString = "Week" + WeekNumber + "*";
+            string TodaySearchString = "TodaysTime.txt";
+            string[] Weekfiles = Directory.GetFiles(@"C:\_Timecards\" + iCurrentYear + @"\", WeekSearchString);
+            string[] Todayfiles = Directory.GetFiles(@"C:\_Timecards\", TodaySearchString);
+            string AppendWeek;
+            string AppendToday;
+
+
+            // Ensure the Cursor is at the Beginning of a New Line to Avoid Strings Getting Lumped Together and Causing Issues with Readback and Parsing
+            textBoxTodaysTime.Select(textBoxTodaysTime.Text.Length + 1, 0);
+            textBoxSelectedWeek.Select(textBoxSelectedWeek.Text.Length + 1, 0);
+
+            // If Entering Time for Today and Use Manaul Date Info is NOT Checked, Then Set DateCode to Current Date
+            if (CheckBoxManualDateInfo.IsChecked == false)
+                DateCode = sCurrentDayAbv + " - " + iCurrentYear + "." + iCurrentMonth + "." + iCurrentDay + " - ";
+            else
+            {
+
+                // If Use Manaul Date Info IS CHECKED, Use These Values.
+
+                ManualDayAbv = comboBoxManualDay.Text.Remove(3, (comboBoxManualDay.Text.Length - 3));
+
+
+                DateCode = ManualDayAbv + " - " + textBoxManualYear.Text + "." + textBoxManualMonth.Text + "." + textBoxManualDay.Text + " - ";
+            }
+
+            // Parse out the Descriptions from the Project Number Combobox to Log the Project Number Only
+            if (comboBoxProjectNumber.Text.StartsWith("7") == false & comboBoxProjectNumber.Text.StartsWith("8") == false & comboBoxProjectNumber.Text.StartsWith("9") == false)
+                ProjectNumber = comboBoxProjectNumber.Text.Remove(6, comboBoxProjectNumber.Text.Length - 6);
+            else
+                ProjectNumber = comboBoxProjectNumber.Text.Remove(4, comboBoxProjectNumber.Text.Length - 4);
+
+
+
+
+            // Parse out the Descriptions from the Work Order Combobox to Log the Work Order Number Only
+            WorkOrderNumber = comboBoxWorkOrderNumber.Text.Remove(4, comboBoxWorkOrderNumber.Text.Length - 4);
+
+            ChargeCode = ProjectNumber + " - " + WorkOrderNumber + " - " + comboBoxOpNum.Text + " - " + comboBoxWrkCtrID.Text + " - " + textBoxHours.Text + " Hours";
+
+
+
+
+
+
+            // If No Comment Preset, Then Write Files Without Comment Field
+            if (textBoxComment.Text == "")
+            {
+
+                // Write Week to File
+                AppendWeek = DateCode + ChargeCode;
+                if (Weekfiles.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = Weekfiles[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen)
+                    WeekFilePath = file3dopen.FileName;
+                    using (StreamWriter sw = File.AppendText(WeekFilePath))
+                    {
+                        sw.WriteLine(Constants.vbCrLf + AppendWeek);
+                        sw.Close();
+                    }
+
+                    File.WriteAllText(WeekFilePath, Regex.Replace(File.ReadAllText(WeekFilePath), @"(?m)^\s+^", ""));
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileWriteFailed = true;
+                }
+
+                // Write Today to File
+                AppendToday = DateCode + ChargeCode;
+                if (Todayfiles.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = Todayfiles[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen)
+                    TodayFilePath = file3dopen.FileName;
+                    using (StreamWriter sw = File.AppendText(TodayFilePath))
+                    {
+                        sw.WriteLine(Constants.vbCrLf + AppendToday);
+                        sw.Close();
+                    }
+
+                    File.WriteAllText(TodayFilePath, Regex.Replace(File.ReadAllText(TodayFilePath), @"(?m)^\s+^", ""));
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileWriteFailed = true;
+                }
+            }
+            else
+            {
+
+
+
+                // Write Week to File
+                AppendWeek = DateCode + ChargeCode + " - " + textBoxComment.Text;
+                if (Weekfiles.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = Weekfiles[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen)
+                    WeekFilePath = file3dopen.FileName;
+                    using (StreamWriter sw = File.AppendText(WeekFilePath))
+                    {
+                        sw.WriteLine(Constants.vbCrLf + AppendWeek);
+                        sw.Close();
+                    }
+
+                    File.WriteAllText(WeekFilePath, Regex.Replace(File.ReadAllText(WeekFilePath), @"(?m)^\s+^", ""));
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileWriteFailed = true;
+                }
+
+                // Write Today to File
+                AppendToday = DateCode + ChargeCode + " - " + textBoxComment.Text;
+                if (Todayfiles.Length > 0)
+                {
+                    ProcessStartInfo file3dopen = new ProcessStartInfo();
+                    {
+                        var withBlock = file3dopen;
+                        withBlock.FileName = Todayfiles[0];
+                        withBlock.UseShellExecute = true;
+                    }
+                    // Process.Start(file3dopen)
+                    TodayFilePath = file3dopen.FileName;
+                    using (StreamWriter sw = File.AppendText(TodayFilePath))
+                    {
+                        sw.WriteLine(Constants.vbCrLf + AppendToday);
+                        sw.Close();
+                    }
+
+                    File.WriteAllText(TodayFilePath, Regex.Replace(File.ReadAllText(TodayFilePath), @"(?m)^\s+^", ""));
+                }
+                else
+                {
+                    // file not found
+                    Interaction.MsgBox("No Such File Exists");
+                    FileWriteFailed = true;
+                }
+            }
+
+
+
+
+            LoadSelectedWeek();
+            LoadTodaysTime();
+            buttonSaveChanges.Visibility = System.Windows.Visibility.Collapsed;
+
+
+            // Clear out Entires to be Ready for Another Different Entry
+            comboBoxProjectNumber.SelectedIndex = 0;
+            comboBoxWorkOrderNumber.Items.Clear();
+            comboBoxWorkOrderNumber.Items.Add("Work Order");
+            comboBoxWorkOrderNumber.SelectedIndex = 0;
+            comboBoxOpNum.Text = "OpNumber";
+            comboBoxWrkCtrID.Text = "Work Center ID";
+            textBoxHours.Text = "Hours Worked";
+            textBoxComment.Text = "";
+
+
+            // If Manual Info is used, reset Manual Entries for Another Different Entry
+            if (CheckBoxManualDateInfo.IsChecked == true)
+            {
+                comboBoxManualDay.Text = "";
+                textBoxManualYear.Text = "Year";
+                textBoxManualMonth.Text = "Month";
+                textBoxManualDay.Text = "Day";
+                CheckBoxManualDateInfo.IsChecked = false;
+            }
+        }
+
+        public void buttonPreviousWeek_Click(object sender, RoutedEventArgs e)
+        {
+            // Go Back to the Previous Week. Load that Weeks Text File into the Selected Weeks Text Box
+            WeekNumber -= 1;
+            LoadSelectedWeek();
+
+            if (FileLoadFailed == true)
+            {
+                WeekNumber += 1;
+                FileLoadFailed = false;
+                LoadSelectedWeek();
+            }
+        }
+
+        public void buttonNextWeek_Click(object sender, RoutedEventArgs e)
+        {
+            // Go Forward to the Next Week. Load that Weeks Text File into the Selected Weeks Text Box
+            WeekNumber += 1;
+            LoadSelectedWeek();
+
+            if (FileLoadFailed == true)
+            {
+                WeekNumber -= 1;
+                FileLoadFailed = false;
+                LoadSelectedWeek();
+            }
+        }
+
+        public void CheckBoxManualDateInfo_Checked(object sender, RoutedEventArgs e)
+        {
+            UseManualDateInfo = true;
+
+            // Detect if the Manual Date Entry Info Checkbox is Checked and show the Manual Entry Fields
+
+            comboBoxManualDay.Visibility = Visibility.Visible;
+            textBoxManualYear.Visibility = Visibility.Visible;
+            textBoxManualMonth.Visibility = Visibility.Visible;
+            textBoxManualDay.Visibility = Visibility.Visible;
+
+            textBlockManualWeekDay.Visibility = Visibility.Visible;
+            textBlockManualYear.Visibility = Visibility.Visible;
+            textBlockManualMonth.Visibility = Visibility.Visible;
+            textBlockManualDay.Visibility = Visibility.Visible;
+        }
+
+        public void CheckBoxManualDateInfo_Unchecked(object sender, RoutedEventArgs e)
+        {
+            UseManualDateInfo = false;
+            // Detect if the Manual Date Entry Info Checkbox is UNChecked and Hide the Manual Entry Fields
+
+            comboBoxManualDay.Visibility = Visibility.Hidden;
+            textBoxManualYear.Visibility = Visibility.Hidden;
+            textBoxManualMonth.Visibility = Visibility.Hidden;
+            textBoxManualDay.Visibility = Visibility.Hidden;
+
+            textBlockManualWeekDay.Visibility = Visibility.Hidden;
+            textBlockManualYear.Visibility = Visibility.Hidden;
+            textBlockManualMonth.Visibility = Visibility.Hidden;
+            textBlockManualDay.Visibility = Visibility.Hidden;
+        }
+
+        public void SaveTodaysChanges()
+        {
+
+            // Used to Manually Save TodaysTime File. Anything that is Currently in the TextBox on the Screen Will Be Written to the File. This Overwrites the File Entirely.
+
+            string FilePath;
+            string sSearchString = "TodaysTime.txt";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\", sSearchString);
+            string AppendText = textBoxTodaysTime.Text;
+
+            if (files.Length > 0)
+            {
+                ProcessStartInfo file3dopen = new ProcessStartInfo();
+                {
+                    var withBlock = file3dopen;
+                    withBlock.FileName = files[0];
+                    withBlock.UseShellExecute = true;
+                }
+                // Process.Start(file3dopen)
+                FilePath = file3dopen.FileName;
+                System.IO.File.WriteAllText(FilePath, AppendText);
+
+                // Ensure the Cursor is at the Beginning of a New Line to Avoid Strings Getting Lumped Together and Causing Issues with Readback and Parsing
+                textBoxTodaysTime.Select(textBoxTodaysTime.Text.Length, 0);
+            }
+            else
+            {
+                // File Not found
+                Interaction.MsgBox("No Such File Exists");
+                FileWriteFailed = true;
+            }
+
+
+            LoadTodaysTime();
+
+            // Ensure the Cursor is at the Beginning of a New Line to Avoid Strings Getting Lumped Together and Causing Issues with Readback and Parsing
+            textBoxTodaysTime.Select(textBoxTodaysTime.Text.Length, 0);
+        }
+        public void SaveWeeksChanges()
+        {
+            // Used to Manually Save the SelectedWeek File. Anything that is Currently in the TextBox on the Screen Will Be Written to the File. This Overwrites the File Entirely.
+
+            string FilePath;
+            string sSearchString = "Week" + WeekNumber + "*";
+            string[] files = Directory.GetFiles(@"C:\_Timecards\" + iCurrentYear + @"\", sSearchString);
+            string AppendText = textBoxSelectedWeek.Text;
+
+            if (files.Length > 0)
+            {
+                ProcessStartInfo file3dopen = new ProcessStartInfo();
+                {
+                    var withBlock = file3dopen;
+                    withBlock.FileName = files[0];
+                    withBlock.UseShellExecute = true;
+                }
+                // Process.Start(file3dopen)
+                FilePath = file3dopen.FileName;
+                System.IO.File.WriteAllText(FilePath, AppendText);
+
+                // Ensure the Cursor is at the Beginning of a New Line to Avoid Strings Getting Lumped Together and Causing Issues with Readback and Parsing
+                textBoxSelectedWeek.Select(textBoxSelectedWeek.Text.Length, 0);
+            }
+            else
+            {
+                // File Not found
+                Interaction.MsgBox("No Such File Exists");
+                FileWriteFailed = true;
+            }
+
+
+            LoadSelectedWeek();
+
+            // Ensure the Cursor is at the Beginning of a New Line to Avoid Strings Getting Lumped Together and Causing Issues with Readback and Parsing
+            textBoxSelectedWeek.Select(textBoxSelectedWeek.Text.Length, 0);
+        }
+        public void buttonSaveChanges_Click(object sender, RoutedEventArgs e)
+        {
+
+            // When the Save Changes Button is Pressed, Call the two Subs for Writing the Text Boxes to the Files. Do this Regardless
+            // of Which Box Had Changes Made to it.
+
+            SaveTodaysChanges();
+            SaveWeeksChanges();
+
+            // After Changes have been saved, Hide the Save Changes Button Again.
+            buttonSaveChanges.Visibility = System.Windows.Visibility.Collapsed;
+        }
+
+        public void buttonGenerateEmail_Click(object sender, RoutedEventArgs e)
+        {
+
+            // This Sub Generates the Email to Send Time Data to Accounting to Enter into the JobScope/SAP Back End
+
+            var ThisWeek = iCurrentWeek - 1;
+            DateTime TodaysDate = DateTime.Now;
+            string[] FirstLine;
+            string FirstLineDate;
+            string TextLine;
+            string[] StringArray;
+            int FirstlineLength;
+            DateTime NonCurrentDate;
+            DateOnly NonCurrentDateOnly;
+            DateTime Monday;
+
+            int ArrayLength;
+
+
+            if ((bool)CheckBoxManualDateInfo.IsChecked)
+            {
+                // Find the Date of the Monday on the Current Time Card if Manual Date Entry is Selected in Case This Time Card is for Another Week.
+                FirstlineLength = textBoxSelectedWeek.Text.Length;
+                FirstLine = textBoxSelectedWeek.Text.Split(Constants.vbCrLf);
+                TextLine = FirstLine[0];
+                StringArray = TextLine.Split(" - ", StringSplitOptions.None);
+                ArrayLength = StringArray.Length;
+                if (ArrayLength >= 6)
+                {
+                    FirstLineDate = StringArray[1];
+                    StringArray = null;
+                    NonCurrentDate = DateTime.Parse(FirstLineDate);
+                    Monday = NonCurrentDate;
+                }
+
+
+
+
+            }
+            else
+            {
+
+
+                // The following is used to find the date of the first day of the week if the first day of the week is a Monday, and if the current timecard is from this week.
+                DateTime today = DateTime.Today;
+                int dayIndex = (int)today.DayOfWeek;
+                if (dayIndex < (int)DayOfWeek.Monday)
+                    dayIndex += 7;// Monday is first day of week, no day of week should have a smaller index
+                int dayDiff = (int)(dayIndex - DayOfWeek.Monday);
+                Monday = today.AddDays(-dayDiff);
+            }
+
+
+            // Open and fill a new email with the pertinent details.
+            Microsoft.Office.Interop.Outlook.Application oApp = new Microsoft.Office.Interop.Outlook.Application();
+            Microsoft.Office.Interop.Outlook._MailItem oMailItem = (Microsoft.Office.Interop.Outlook._MailItem)oApp.CreateItem(Microsoft.Office.Interop.Outlook.OlItemType.olMailItem);
+
+
+            Microsoft.Office.Interop.Outlook.AddressEntry addrEntry =
+            oApp.Session.CurrentUser.AddressEntry;
+            if (addrEntry.Type == "EX")
+            {
+                Microsoft.Office.Interop.Outlook.ExchangeUser currentUser =
+                    oApp.Session.CurrentUser.
+                    AddressEntry.GetExchangeUser();
+
+                var SenderEmail = currentUser.PrimarySmtpAddress;
+                oMailItem.To = "Michael Kowalski <mkowalski@autotecinc.com>";
+                if ((bool)checkBoxCCMe.IsChecked)
+                    oMailItem.CC = SenderEmail;
+                oMailItem.Subject = "Time for " + textBlockCurrentDateTime.Text;
+                oMailItem.Body = textBoxTodaysTime.Text;
+                oMailItem.Importance = Microsoft.Office.Interop.Outlook.OlImportance.olImportanceLow;
+                oMailItem.Display(true);
+                textBoxTodaysTime.Text = "";
+                SaveTodaysChanges();
+            }
+
+
+        }
+
+        private void buttonHelp_Click(object sender, RoutedEventArgs e)
+        {
+            // Show the Help Screen
+
+            HelpInstructionsWindow InstructionsWindow = new HelpInstructionsWindow();
+
+            InstructionsWindow.Owner = this;
+            InstructionsWindow.Show();
+        }
+
+        private void buttonChargeCodes_click(object sender, RoutedEventArgs e)
+        {
+            // Show the Charge Codes Screen
+
+            HelpChargeCodesWindow ChargeCodesWindow = new HelpChargeCodesWindow();
+
+            ChargeCodesWindow.Owner = this;
+            ChargeCodesWindow.Show();
+        }
+
+        private void comboBoxWrkCtrID_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // Detect Which Work Center ID has been selected. If it is greater than or equal to 20, (QUOT - MEET) then automatically put 
+            // all 0's into the OpNumber Combobox as there is no corellating Op Number to these Work Center IDs.
+
+            if (comboBoxWrkCtrID.SelectedIndex >= 20)
+                comboBoxOpNum.Text = "0000";
+        }
+    }
+}
